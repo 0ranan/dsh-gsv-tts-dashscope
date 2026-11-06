@@ -1,0 +1,1 @@
+{"version":3,"file":"text-cleaner.d.ts","sourceRoot":"","sources":["../src/text-cleaner.ts"],"names":[],"mappings":"AAAA,wCAAwC;AACxC,eAAO,MAAM,eAAe,OAAO,CAAC;AACpC,2CAA2C;AAC3C,eAAO,MAAM,yBAAyB,QAAQ,CAAC;AAC/C,2BAA2B;AAC3B,eAAO,MAAM,iBAAiB,MAAM,CAAC;AAErC,qBAAa,WAAW;IACtB,MAAM,CAAC,KAAK,CAAC,IAAI,EAAE,MAAM,GAAG,MAAM;CA6BnC"}

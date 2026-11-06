@@ -1,0 +1,159 @@
+# 变更记录
+
+本文件记录 dsh-gsv-tts 的所有版本更新。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [5.1.0-dashscope.1] - 2026-11-06
+
+### 本 fork 的两处改动（相对上游 5.0.1）
+
+**修复：工具卡死拖死整个会话**
+- 新增 `withDeadline()`：在 service 层对合成加 `Promise.race` 硬超时，超时抛 `TTS_TIMEOUT`。
+- 背景：`edge-tts-universal` 的 `stream()` 不响应 abort，插件原来只在 chunk 之间检查 `signal.aborted`；
+  DSH 的工具超时是协作式的，工具 promise 永不 settle 时 agent-loop 的 `runGroup` 会一直 `await Promise.race(inFlight)`，
+  导致 step 结束不了、整个会话卡死，只能重启进程。
+
+**新增：阿里百炼 DashScope 云端后端**
+- `cloudBackend: 'edge' | 'dashscope'`，与 Edge 并列，不改变原 `provider` 语义。
+- 按模型自动选端点：`qwen-audio-*`/`cosyvoice-*`/`sambert-*` → `/api/v1/services/audio/tts/SpeechSynthesizer`；
+  其余（`qwen3-tts-flash`）→ `/api/v1/services/aigc/multimodal-generation/generation`。
+- 接入域名自动规范化（容忍粘贴 `wss://…/api-ws/v1/inference`、路径与空格）。
+- 单次 ≤600 字符，内部按 540 切段并拼接 WAV（RIFF `data` 块合并），支持 qwen3-tts-flash 与 qwen-audio-tts。
+- 音频落到本地 `AudioStore`，不把 24h 签名 URL 交给前端；返回真实时长。
+- 404/401/429/Endpoint.AccessDenied 等错误映射成中文可操作提示。
+
+**修复：子路径反代部署**
+- 客户端 18 处 `fetch("/dsh-gsv-tts/…")` 改为相对路径（`/dsh/` 挂载下会被 nginx 的 `location /` 接走）。
+- 音频 URL 改用 `dsh web --public-url` 的「源站 + 挂载前缀」拼绝对地址，避免吐出 `127.0.0.1:3080`。
+
+## [5.0.1] - 2026-10-29
+
+### 音色市场投稿指南
+- 新增中英双语《音色市场投稿指南》：[docs/VOICE_MARKET.md](docs/VOICE_MARKET.md)，包含上传流程、音频要求、许可与授权、审核与上架、安装与常见问题，鼓励用户分享自己喜欢的音色
+- README / README_EN 顶部新增「音色市场」徽章与投稿指南入口；功能亮点补充投稿链接
+- npm 包新增 `docs/VOICE_MARKET.md`（随包分发）
+- 仅文档变更，不涉及运行时代码
+
+## [5.0.0] - 2026-10-26
+
+### 适配 DSH 0.2.1-rc.2（破坏性变更）
+- **运行环境**：`engines.dsh: ^0.2.1-rc.2`；peer 依赖升级到 `@deepseek-ai/dsh-tools@^0.2.1-rc.2`、`@deepseek-ai/schemastery@^3.18.5`。DSH 0.1.x 请继续使用 4.x。
+- **设置服务迁移**：DSH 0.2 移除了 `ctx.settings.register()` / `settingsScope`，改为「Config Schema 推导表单」：
+  - `Config` 全字段标记 `Schema.volatile()`，设置面板可即时编辑，保存后宿主**就地更新配置引用、不重载插件**；
+  - 运行时统一通过 `snapshotConfig()` 解引用 volatile 配置（兼容普通对象），每次操作读取最新值；
+  - 写回（provider 迁移、音色市场安装/卸载）改走 `ctx.settings.update(entryId, patch)`。
+- **客户端服务迁移**：`settingsScope` → `configForms`（`ctx.configForms.get(ns)`）；设置卡片兼容 `loading` / `unavailable` 状态，不再因设置服务缺失而空白。
+- **会话读取**：`/speak` 改用 `session.snapshotEvents()`（DSH 0.2 不再保证 `session.events` / `session.log`）。
+- **音频地址**：`AudioStore` 改为按需读取 `ctx.webServer.getOrigin()`，避免监听绑定前 `port` 未定义导致的错误地址；无同源地址时退回同源相对路径。
+- **provider 迁移**：无 `provider` 字段时按「有音色 → gsv，无音色 → edge」判定，并在 Loader 就绪后写回一次（幂等）。
+- **插件清单**：`dsh.client.inject` 清理为 DSH 0.2 实际存在的包（client-modules / locale / ui-slots / ui-settings）；移除已不存在的 `dsh-client-runtime`。
+- 新增单测：volatile 配置解引用、就地热更新语义、迁移判定；构建/测试与真实 DSH 0.2.1 profile 启动、设置读写、provider 热切换均通过验证。
+
+## [4.1.0] - 2026-08-31
+
+### Edge 音色体验优化
+- 新增云端（Edge）音色试听路由 `/dsh-gsv-tts/provider/preview`：无论当前处于本地模式还是云端模式，都可直接试听云端音色（`voice` = 云端音色 id，强制走 edge 提供方），面板试听云端音色不再依赖当前 provider
+- Edge 音色显示名本地化：中文音色显示官方中文名（晓晓/云希/云野/晓伊…，方言如 晓北（辽宁）/晓妮（陕西）），主流英文音色显示简写名（Aria/Guy/Emma/Sonia），其余从 FriendlyName 截短（去除 "Microsoft … Online" 前缀）
+- 单测联动更新：中文/英文音色显示名断言 + FriendlyName 截短行为覆盖
+
+## [4.0.0] - 2026-08-31
+
+### 简单模式（Edge 云端第二 Provider）
+- 双 Provider 抽象：`gsv`（本地克隆/离线专业模式）+ `edge`（微软 Edge 云端简单模式），按 `config.provider` 分发，接口 `{kind, listVoices, stream, health}`
+- **迁移守卫**：老用户（settings 无 provider 字段）保持 `gsv`、声音不变；全新安装默认 `edge`；切换后写回持久化
+- Edge 底层 `edge-tts-universal`（原生流式、token 自动刷新、错误恢复、代理），MP3 块零转码透传（`audio/mpeg`），复用 AudioStore/分段渐进播放/暂停下载
+- 音色清单：`listVoices` 按精选序 + zh-CN/en 过滤生成（晓晓/云希/云野等 20+ 中文 + Aria 等英文）
+- **分层健康**：库内 error-recovery/token 刷新兜底瞬时故障；`health()` = 试合成 1 秒 + 退避（≤1 次/60s，30→60→120s，成功重置）
+- 设置面板：模式切换 Tab（快速体验/本地专业）+ 品质角标（🌐 云端 / 🖥️ 本地·离线）+ 音色下拉按 provider 换源 + 云端健康行与降级引导
+- 新增路由 `/provider/voices` `/provider/health`；`tts_speak`/`tts_list_voices` 按 provider 分发
+- `quotaDaily` 配置字段（默认不限量，仅引导文案，硬计数留待 4.x）
+- 单测并入 CI：迁移双分支、Edge MP3 透传、精选音色过滤、健康退避、TTSService 分发落盘
+
+## [3.0.0] - 2026-08-30
+
+### 音色 Registry 一键安装（P2）
+- 音色市场：包内离线清单（`docs/voices.json`）或自定义远端源（`voiceRegistryUrl`，服务端拉取带 no-cache）
+- 信任规则：信任 = 随插件发版内置——仅包内清单且 `trusted` 为真免确认；**任何远端清单一律两阶段确认**（即便自报 trusted），阶段 1 不下载任何字节
+- 三工具 `tts_voice_registry` / `tts_voice_install` / `tts_voice_remove` + 同源 HTTP 路由 `registry/{list,install,remove}`，共享核心
+- 安装：下载 → sha256 强校验 → 大小/后缀白名单 → 原子落盘 `<installDir>/voices/<id>/` → 写回 `Config.voices`（id + source 账本），失败不留半成品、不写配置
+- 只读托管：`source:'registry'` 音色在设置面板只读、仅可卸载；卸载按 id 精确匹配，自定义音色拒绝删，`defaultVoice` 悬空一并清空
+- 面板新增"音色市场"卡：来源/信任徽标、试听（复用 /preview）、两阶段确认安装、卸载删除文件确认
+- 单测并入 CI：清单校验、信任边界、原子写、卸载护栏、路径穿越
+
+## [2.6.0] - 2026-08-29
+
+### 设置面板增强（P1-3）
+- 每条音色新增"试听"按钮：用固定试听文案单次合成并播放（**未保存的草稿音色也能直接试听**，便于"靠耳朵挑"）
+- 新增"全部试听（循环）"：批量合成所有音色后循环播放，边听边对比，可暂停/停止；失败音色给出提示
+- 面板顶栏的引擎运行状态 + 一键启停自 2.2.0 起已提供，本次无改动
+
+## [2.5.0] - 2026-08-29
+
+### 朗读净化补全（P0-1）
+- 过滤 markdown 表格（数据行与分隔行），只读表格外的正文
+- 超长文本保护：`tts_speak` 单段上限 6000 字符，朗读/自动朗读分段上限 30000 字符，超限给出友好提示
+- 空文本判断与合成口径统一：清洗后为空（只有代码/链接/表格）的回复返回明确提示
+- 新增单元测试（`npm test`，基于 node:test，零新增依赖）：净化器与句切分器
+
+### 渐进分段播放（P1-1）
+- 服务端新增 `TTSService.synthesizeSegments`：按句切分（中文句末标点、顿号 + 英文句点，单段 ≤ 800 字）逐段流式合成，段间 0 静音
+- `/dsh-gsv-tts/speak` 返回可顺序播放的 URL 队列（`segments`），兼容旧单 URL 字段
+- 前端播放器按 `<audio>` ended 事件自动续播下一段——长回复不再等整段合成完才出声
+
+### 朗读控件（P1-2）
+- 朗读按钮新增 暂停 / 继续 / 停止 三键，作用于整个分段队列（记录当前段 + 段内时间）
+- 显示朗读进度（已播 / 总时长 + 段序号）
+- 高亮正在朗读的那条消息（呼吸边框）
+
+### 自动朗读打断（P0-2）
+- 自动朗读改为"通知 → 前端按需合成播放"：服务端递增 seq，前端轮询感知新回复
+- 新回复到来时默认打断当前朗读（barge-in）；设置中可关闭 `interruptOnNew`，朗读中跳过新回复避免叠音
+
+## [2.3.2] - 2026-08-28
+
+- 对齐 `@deepseek-ai/dsh-tools` peer 依赖范围（`^0.1.0-rc.6`），与 lockfile 一致
+- CI：`pnpm/action-setup` 从 `packageManager` 字段读取版本
+- 文档：README 补充 CI/npm 徽章与 2.3.x 变更记录
+
+## [2.3.1] - 2026-08-28
+
+- 补全 npm 发布元数据（`keywords`、`license`、`repository` 等）以支持插件市场收录
+- 新增 GitHub Actions CI 与发布前 manifest 校验（`npm run verify`）
+- 新增 `docs/PUBLISHING.md` 发布指南
+
+## [2.3.0] - 2026-08-27
+
+- 真流式客户端改进与引擎兼容补丁
+- 补充引擎安装与语音下载指南
+- 新增界面截图
+- README 双语重写，明确 npm / GitHub 双通道安装
+
+## [2.2.0] - 2026-08-26
+
+- 声音设置面板（保存即热生效，无需重启）
+- 引擎一键启停开关
+- 🔊 朗读按钮（排除思考内容；引擎未启动时给出明确原因）
+- 设置内帮助文档
+- 音频同源短链接
+
+## [2.1.0] - 2026-08-25
+
+- 音频改由 DSH Web 服务同源提供（不再用巨型 data URL）
+- WAV 头/时长计算修复
+- `prompt_text` 留空时 ASR 兜底
+- `execFileSync` 消除命令注入风险
+- `py -3` 支持
+- 健康检查路径探测
+
+## [2.0.0] - 2026-08-24
+
+- 首个正式版本：接入 GSV-TTS-Lite 本地 TTS 引擎
+- 提供 `tts_speak` / `tts_list_voices` / `tts_health_check` / `tts_setup_engine` 四个工具
+
+[2.6.0]: https://github.com/TaoruiLiu19/dsh-gsv/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/TaoruiLiu19/dsh-gsv/compare/v2.3.2...v2.5.0
+[2.3.2]: https://github.com/TaoruiLiu19/dsh-gsv/compare/v2.3.1...v2.3.2
+[2.3.1]: https://github.com/TaoruiLiu19/dsh-gsv/compare/v2.3.0...v2.3.1
+[2.3.0]: https://github.com/TaoruiLiu19/dsh-gsv/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/TaoruiLiu19/dsh-gsv/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/TaoruiLiu19/dsh-gsv/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/TaoruiLiu19/dsh-gsv/releases/tag/v2.0.0
