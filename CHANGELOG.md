@@ -21,6 +21,11 @@
 - 音频落到本地 `AudioStore`，不把 24h 签名 URL 交给前端；返回真实时长。
 - 404/401/429/Endpoint.AccessDenied 等错误映射成中文可操作提示。
 
+**行为改进：切换会话即中断朗读**
+- 播放器是全局单例，原来切到别的会话时旧会话的朗读还在播（串台）。
+- 现在在会话头部注册一个不渲染的守卫（`conversation.session.header.actions`），
+  朗读按钮另有一层兜底：检测到 sessionId 变化就 `player.stop()`。
+
 **修复：子路径反代部署**
 - 客户端 18 处 `fetch("/dsh-gsv-tts/…")` 改为相对路径（`/dsh/` 挂载下会被 nginx 的 `location /` 接走）。
 - 音频 URL 改用 `dsh web --public-url` 的「源站 + 挂载前缀」拼绝对地址，避免吐出 `127.0.0.1:3080`。
